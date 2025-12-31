@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Complex Plane Explorer</title>
+<style>
+body {
+  background: linear-gradient(135deg, #0a0e1a, #1a1f2e);
+  color: #e0e0ff;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  margin: 0;
+  padding: 20px 0;
+}
+
+h1 { font-weight: 300; letter-spacing: 2px; margin-bottom: 10px; text-align: center; }
+canvas {
+  background: #0d1117;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  border: 1px solid #333;
+}
+.container {
+  background: rgba(20,25,40,0.6);
+  backdrop-filter: blur(10px);
+  padding: 20px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  width: 520px;
+  margin-top: 20px;
+}
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+label { display: block; margin: 8px 0 4px; font-size: 0.95em; }
+input[type="range"] { width: 100%; accent-color: #5cc8ff; }
+input[type="number"] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #444; background:#1a1f2e; color:#fff;}
+button {
+  padding: 10px; background: #5cc8ff; border: none; border-radius: 8px;
+  color: #000; font-weight: bold; cursor: pointer; transition: 0.3s;
+}
+button:hover { background: #80d8ff; }
+.full-width { grid-column: 1 / -1; }
+.info { text-align:center; margin-top:12px; font-family:monospace; font-size:1.1em; color:#ff9e9e; }
+</style>
+</head>
+<body>
+
+<h1>Complex Plane Explorer</h1>
+<canvas id="plane" width="500" height="500"></canvas>
+
+<div class="container">
+  <div class="controls">
+
+    <label>r min</label>
+    <input type="number" id="rMin" value="0" step="0.1">
+    <label>r max</label>
+    <input type="number" id="rMax" value="4" step="0.1">
+
+    <label>θ min (radians)</label>
+    <input type="number" id="thetaMin" value="0" step="0.01">
+    <label>θ max (radians)</label>
+    <input type="number" id="thetaMax" value="6.283" step="0.01">
+
+    <label>r value: <span id="rVal">1.0</span></label>
+    <input type="range" id="r" min="0" max="4" step="0.01" value="1">
+
+    <label>θ value: <span id="thetaVal">0.0</span></label>
+    <input type="range" id="theta" min="0" max="6.283" step="0.01" value="0">
+
+    <label class="full-width">
+      <input type="checkbox" id="trace"> Show trace history
+    </label>
+
+    <div class="full-width">
+      <button id="clear">Clear Trace</button>
+    </div>
+
+  </div>
+
+  <div class="info" id="info">z = 1.00 + 0.00i |z| = 1.00 arg = 0.00 rad</div>
+</div>
+
+<script>
+const canvas = document.getElementById("plane");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+const scale = 80; // pixels per unit
+
+// Controls
+const rSlider = document.getElementById("r");
+const thetaSlider = document.getElementById("theta");
+const traceCheckbox = document.getElementById("trace");
+const clearBtn = document.getElementById("clear");
+const rValSpan = document.getElementById("rVal");
+const thetaValSpan = document.getElementById("thetaVal");
+const infoDiv = document.getElementById("info");
+
+const rMinInput = document.getElementById("rMin");
+const rMaxInput = document.getElementById("rMax");
+const thetaMinInput = document.getElementById("thetaMin");
+const thetaMaxInput = document.getElementById("thetaMax");
+
+let history = [];
+
+// Update slider ranges
+function updateSliderRanges(){
+  const rMin = parseFloat(rMinInput.value);
+  const rMax = parseFloat(rMaxInput.value);
+  if(!isNaN(rMin) && !isNaN(rMax) && rMin<rMax){
+    rSlider.min = rMin; rSlider.max = rMax;
+    if(parseFloat(rSlider.value)<rMin) rSlider.value = rMin;
+    if(parseFloat(rSlider.value)>rMax) rSlider.value = rMax;
+  }
+
+  const tMin = parseFloat(thetaMinInput.value);
+  const tMax = parseFloat(thetaMaxInput.value);
+  if(!isNaN(tMin) && !isNaN(tMax) && tMin<tMax){
+    thetaSlider.min = tMin; thetaSlider.max = tMax;
+    if(parseFloat(thetaSlider.value)<tMin) thetaSlider.value = tMin;
+    if(parseFloat(thetaSlider.value)>tMax) thetaSlider.value = tMax;
+  }
+  draw();
+}
+
+// Draw axes and grid
+function drawAxes() {
+  ctx.clearRect(0,0,W,H);
+  // Grid lines
+  ctx.strokeStyle="#2a2f40";
+  ctx.lineWidth=1;
+  for(let i=-5;i<=5;i++){
+    if(i===0) continue;
+    ctx.beginPath();
+    ctx.moveTo(W/2+i*scale,0); ctx.lineTo(W/2+i*scale,H);
+    ctx.moveTo(0,H/2-i*scale); ctx.lineTo(W,H/2-i*scale);
+    ctx.stroke();
+  }
+  // Axes
+  ctx.strokeStyle="#555";
+  ctx.beginPath();
+  ctx.moveTo(W/2,0); ctx.lineTo(W/2,H);
+  ctx.moveTo(0,H/2); ctx.lineTo(W,H/2);
+  ctx.stroke();
+  // Unit circle
+  ctx.strokeStyle="#333";
+  ctx.beginPath();
+  ctx.arc(W/2,H/2,scale,0,2*Math.PI);
+  ctx.stroke();
+}
+
+// Complex number helper
+function complex(re, im){ return {re, im}; }
+
+// Compute z = r * e^{i*theta}
+function computeZ(r, theta){
+  return complex(r*Math.cos(theta), r*Math.sin(theta));
+}
+
+// Draw point and trace
+function draw(){
+  drawAxes();
+
+  const r = parseFloat(rSlider.value);
+  const theta = parseFloat(thetaSlider.value);
+
+  rValSpan.textContent = r.toFixed(2);
+  thetaValSpan.textContent = theta.toFixed(2);
+
+  const z = computeZ(r, theta);
+  const px = W/2 + z.re*scale;
+  const py = H/2 - z.im*scale;
+
+  if(traceCheckbox.checked) history.push({x:px,y:py});
+
+  // Trace
+  ctx.strokeStyle="#5cc8ff";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  history.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y);
+    else ctx.lineTo(p.x,p.y);
+  });
+  ctx.stroke();
+
+  // Current point
+  ctx.fillStyle="#ff6b6b";
+  ctx.beginPath();
+  ctx.arc(px,py,6,0,2*Math.PI);
+  ctx.fill();
+  ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+
+  // Vector from origin
+  ctx.strokeStyle="#ff9e9e"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(px,py); ctx.stroke();
+
+  // Info
+  const mag = Math.sqrt(z.re**2 + z.im**2);
+  const arg = Math.atan2(z.im, z.re);
+  infoDiv.textContent = `z = ${z.re.toFixed(3)}${z.im>=0?'+':''}${z.im.toFixed(3)}i |z|=${mag.toFixed(3)} arg=${arg.toFixed(3)} rad`;
+}
+
+// Event listeners
+[rSlider, thetaSlider, traceCheckbox].forEach(el => el.addEventListener("input", draw));
+[rMinInput,rMaxInput,thetaMinInput,thetaMaxInput].forEach(el=>el.addEventListener("input", updateSliderRanges));
+clearBtn.addEventListener("click", ()=>{history=[]; draw();});
+
+// Initial setup
+updateSliderRanges();
+</script>
+</body>
+</html>
