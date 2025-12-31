@@ -17,12 +17,16 @@ body {
 }
 
 h1 { font-weight: 300; letter-spacing: 2px; margin-bottom: 10px; text-align: center; }
+
 canvas {
   background: #0d1117;
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.6);
   border: 1px solid #333;
+  max-width: 100%;
+  height: auto;
 }
+
 .container {
   background: rgba(20,25,40,0.6);
   backdrop-filter: blur(10px);
@@ -31,11 +35,19 @@ canvas {
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   width: 520px;
   margin-top: 20px;
+  transition: opacity 0.3s;
 }
+
+.fullscreen .container {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 label { display: block; margin: 8px 0 4px; font-size: 0.95em; }
 input[type="range"] { width: 100%; accent-color: #5cc8ff; }
 input[type="number"] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #444; background:#1a1f2e; color:#fff;}
+input[type="checkbox"] { accent-color: #5cc8ff; }
 button {
   padding: 10px; background: #5cc8ff; border: none; border-radius: 8px;
   color: #000; font-weight: bold; cursor: pointer; transition: 0.3s;
@@ -43,12 +55,15 @@ button {
 button:hover { background: #80d8ff; }
 .full-width { grid-column: 1 / -1; }
 .info { text-align:center; margin-top:12px; font-family:monospace; font-size:1.1em; color:#ff9e9e; }
+
+#fullscreenBtn { background: #ff9e9e; }
+#fullscreenBtn:hover { background: #ffb8b8; }
 </style>
 </head>
 <body>
 
 <h1>Complex Plane Explorer</h1>
-<canvas id="plane" width="500" height="500"></canvas>
+<canvas id="plane"></canvas>
 
 <div class="container">
   <div class="controls">
@@ -70,11 +85,22 @@ button:hover { background: #80d8ff; }
     <input type="range" id="theta" min="0" max="6.283" step="0.01" value="0">
 
     <label class="full-width">
-      <input type="checkbox" id="trace"> Show trace history
+      <input type="checkbox" id="trace" checked> Show trace history
+    </label>
+
+    <label class="full-width">
+      <input type="checkbox" id="grid" checked> Show grid and axis labels
     </label>
 
     <div class="full-width">
       <button id="clear">Clear Trace</button>
+      <button id="fullscreenBtn">Full Screen</button>
+    </div>
+
+    <div class="full-width">
+      <button id="zoomIn">Zoom In</button>
+      <button id="zoomOut">Zoom Out</button>
+      <button id="zoomReset">Reset Zoom</button>
     </div>
 
   </div>
@@ -85,14 +111,26 @@ button:hover { background: #80d8ff; }
 <script>
 const canvas = document.getElementById("plane");
 const ctx = canvas.getContext("2d");
+
+// High resolution
+const pixelDensity = 2;
+const nominalSize = 500;
+canvas.width = nominalSize * pixelDensity;
+canvas.height = nominalSize * pixelDensity;
+canvas.style.width = nominalSize + "px";
+canvas.style.height = nominalSize + "px";
+
+let scale = 80 * pixelDensity; // initial scale (pixels per unit)
+
 const W = canvas.width, H = canvas.height;
-const scale = 80; // pixels per unit
 
 // Controls
 const rSlider = document.getElementById("r");
 const thetaSlider = document.getElementById("theta");
 const traceCheckbox = document.getElementById("trace");
+const gridCheckbox = document.getElementById("grid");
 const clearBtn = document.getElementById("clear");
+const fullscreenBtn = document.getElementById("fullscreenBtn");
 const rValSpan = document.getElementById("rVal");
 const thetaValSpan = document.getElementById("thetaVal");
 const infoDiv = document.getElementById("info");
@@ -102,65 +140,154 @@ const rMaxInput = document.getElementById("rMax");
 const thetaMinInput = document.getElementById("thetaMin");
 const thetaMaxInput = document.getElementById("thetaMax");
 
+const zoomInBtn = document.getElementById("zoomIn");
+const zoomOutBtn = document.getElementById("zoomOut");
+const zoomResetBtn = document.getElementById("zoomReset");
+
 let history = [];
+let isFullscreen = false;
+
+function toggleFullscreen() {
+  if (isFullscreen) {
+    document.body.classList.remove("fullscreen");
+    canvas.style.width = nominalSize + "px";
+    canvas.style.height = nominalSize + "px";
+    fullscreenBtn.textContent = "Full Screen";
+  } else {
+    document.body.classList.add("fullscreen");
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    fullscreenBtn.textContent = "Exit Full Screen";
+  }
+  isFullscreen = !isFullscreen;
+  draw();
+}
+
+fullscreenBtn.addEventListener("click", toggleFullscreen);
 
 // Update slider ranges
-function updateSliderRanges(){
-  const rMin = parseFloat(rMinInput.value);
-  const rMax = parseFloat(rMaxInput.value);
-  if(!isNaN(rMin) && !isNaN(rMax) && rMin<rMax){
+function updateSliderRanges() {
+  const rMin = parseFloat(rMinInput.value) || 0;
+  const rMax = parseFloat(rMaxInput.value) || 4;
+  if (rMin < rMax) {
     rSlider.min = rMin; rSlider.max = rMax;
-    if(parseFloat(rSlider.value)<rMin) rSlider.value = rMin;
-    if(parseFloat(rSlider.value)>rMax) rSlider.value = rMax;
+    if (parseFloat(rSlider.value) < rMin) rSlider.value = rMin;
+    if (parseFloat(rSlider.value) > rMax) rSlider.value = rMax;
   }
 
-  const tMin = parseFloat(thetaMinInput.value);
-  const tMax = parseFloat(thetaMaxInput.value);
-  if(!isNaN(tMin) && !isNaN(tMax) && tMin<tMax){
+  const tMin = parseFloat(thetaMinInput.value) || 0;
+  const tMax = parseFloat(thetaMaxInput.value) || 6.283;
+  if (tMin < tMax) {
     thetaSlider.min = tMin; thetaSlider.max = tMax;
-    if(parseFloat(thetaSlider.value)<tMin) thetaSlider.value = tMin;
-    if(parseFloat(thetaSlider.value)>tMax) thetaSlider.value = tMax;
+    if (parseFloat(thetaSlider.value) < tMin) thetaSlider.value = tMin;
+    if (parseFloat(thetaSlider.value) > tMax) thetaSlider.value = tMax;
   }
   draw();
 }
 
-// Draw axes and grid
-function drawAxes() {
-  ctx.clearRect(0,0,W,H);
-  // Grid lines
-  ctx.strokeStyle="#2a2f40";
-  ctx.lineWidth=1;
-  for(let i=-5;i<=5;i++){
-    if(i===0) continue;
-    ctx.beginPath();
-    ctx.moveTo(W/2+i*scale,0); ctx.lineTo(W/2+i*scale,H);
-    ctx.moveTo(0,H/2-i*scale); ctx.lineTo(W,H/2-i*scale);
-    ctx.stroke();
+// Draw axes, grid, and labels
+function drawAxesAndGrid() {
+  const visibleWidth = canvas.clientWidth;
+  const visibleHeight = canvas.clientHeight;
+  const currentScale = scale * (visibleWidth / nominalSize);
+
+  ctx.clearRect(0, 0, W, H);
+
+  const showGrid = gridCheckbox.checked;
+
+  if (showGrid) {
+    // Grid lines
+    ctx.strokeStyle = "#2a2f40";
+    ctx.lineWidth = 1;
+    ctx.font = "12px monospace";
+    ctx.fillStyle = "#888";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+
+    const left = -visibleWidth / 2 / currentScale;
+    const right = visibleWidth / 2 / currentScale;
+    const bottom = -visibleHeight / 2 / currentScale;
+    const top = visibleHeight / 2 / currentScale;
+
+    const minUnit = Math.max(1, Math.pow(10, Math.floor(Math.log10(1 / (currentScale / 80))))); // nicer spacing for labels
+
+    // Vertical grid and Re labels
+    for (let i = Math.ceil(left / minUnit) * minUnit; i <= right; i += minUnit) {
+      if (Math.abs(i) < 0.01) continue; // skip origin (label separately)
+      const x = W / 2 + i * currentScale;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+
+      // Label below axis
+      ctx.fillText(i.toFixed(1), x, H / 2 + 8);
+    }
+
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    // Horizontal grid and Im labels
+    for (let i = Math.ceil(bottom / minUnit) * minUnit; i <= top; i += minUnit) {
+      if (Math.abs(i) < 0.01) continue;
+      const y = H / 2 - i * currentScale;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+
+      // Label left of axis
+      ctx.fillText(i.toFixed(1) + "i", W / 2 - 8, y);
+    }
   }
-  // Axes
-  ctx.strokeStyle="#555";
+
+  // Axes (always visible, thicker)
+  ctx.strokeStyle = "#666";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(W/2,0); ctx.lineTo(W/2,H);
-  ctx.moveTo(0,H/2); ctx.lineTo(W,H/2);
+  ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H);
+  ctx.moveTo(0, H/2); ctx.lineTo(W, H/2);
   ctx.stroke();
+
+  // Axis labels
+  ctx.fillStyle = "#a0a0ff";
+  ctx.font = "bold 16px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("Re", W - 30, H / 2 + 10); // Real axis label right
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("Im", W / 2 + 10, 20); // Imaginary axis label top
+
+  // Origin label
+  ctx.fillStyle = "#888";
+  ctx.font = "12px monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText("0", W / 2 - 5, H / 2 + 5);
+
   // Unit circle
-  ctx.strokeStyle="#333";
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(W/2,H/2,scale,0,2*Math.PI);
+  ctx.arc(W/2, H/2, currentScale, 0, 2 * Math.PI);
   ctx.stroke();
 }
 
-// Complex number helper
-function complex(re, im){ return {re, im}; }
+// Complex helper
+function complex(re, im) { return {re, im}; }
 
-// Compute z = r * e^{i*theta}
-function computeZ(r, theta){
-  return complex(r*Math.cos(theta), r*Math.sin(theta));
+function computeZ(r, theta) {
+  return complex(r * Math.cos(theta), r * Math.sin(theta));
 }
 
-// Draw point and trace
-function draw(){
-  drawAxes();
+// Main draw
+function draw() {
+  const visibleWidth = canvas.clientWidth;
+  const currentScale = scale * (visibleWidth / nominalSize);
+
+  drawAxesAndGrid();
 
   const r = parseFloat(rSlider.value);
   const theta = parseFloat(thetaSlider.value);
@@ -169,44 +296,61 @@ function draw(){
   thetaValSpan.textContent = theta.toFixed(2);
 
   const z = computeZ(r, theta);
-  const px = W/2 + z.re*scale;
-  const py = H/2 - z.im*scale;
+  const px = W / 2 + z.re * currentScale;
+  const py = H / 2 - z.im * currentScale;
 
-  if(traceCheckbox.checked) history.push({x:px,y:py});
+  if (traceCheckbox.checked) {
+    history.push(z);
+  } else {
+    history = [];
+  }
 
   // Trace
-  ctx.strokeStyle="#5cc8ff";
-  ctx.lineWidth=2;
+  ctx.strokeStyle = "#5cc8ff";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  history.forEach((p,i)=>{
-    if(i===0) ctx.moveTo(p.x,p.y);
-    else ctx.lineTo(p.x,p.y);
+  history.forEach((hz, i) => {
+    const hpx = W / 2 + hz.re * currentScale;
+    const hpy = H / 2 - hz.im * currentScale;
+    if (i === 0) ctx.moveTo(hpx, hpy);
+    else ctx.lineTo(hpx, hpy);
   });
   ctx.stroke();
 
   // Current point
-  ctx.fillStyle="#ff6b6b";
+  ctx.fillStyle = "#ff6b6b";
   ctx.beginPath();
-  ctx.arc(px,py,6,0,2*Math.PI);
+  ctx.arc(px, py, 8, 0, 2 * Math.PI);
   ctx.fill();
-  ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
   // Vector from origin
-  ctx.strokeStyle="#ff9e9e"; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(px,py); ctx.stroke();
+  ctx.strokeStyle = "#ff9e9e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W/2, H/2);
+  ctx.lineTo(px, py);
+  ctx.stroke();
 
   // Info
-  const mag = Math.sqrt(z.re**2 + z.im**2);
+  const mag = Math.sqrt(z.re ** 2 + z.im ** 2);
   const arg = Math.atan2(z.im, z.re);
-  infoDiv.textContent = `z = ${z.re.toFixed(3)}${z.im>=0?'+':''}${z.im.toFixed(3)}i |z|=${mag.toFixed(3)} arg=${arg.toFixed(3)} rad`;
+  infoDiv.textContent = `z = ${z.re.toFixed(3)}${z.im >= 0 ? '+' : ''}${z.im.toFixed(3)}i |z|=${mag.toFixed(3)} arg=${arg.toFixed(3)} rad`;
 }
 
 // Event listeners
-[rSlider, thetaSlider, traceCheckbox].forEach(el => el.addEventListener("input", draw));
-[rMinInput,rMaxInput,thetaMinInput,thetaMaxInput].forEach(el=>el.addEventListener("input", updateSliderRanges));
-clearBtn.addEventListener("click", ()=>{history=[]; draw();});
+[rSlider, thetaSlider, traceCheckbox, gridCheckbox].forEach(el => el.addEventListener("input", draw));
+[rMinInput, rMaxInput, thetaMinInput, thetaMaxInput].forEach(el => el.addEventListener("input", updateSliderRanges));
+clearBtn.addEventListener("click", () => { history = []; draw(); });
+zoomInBtn.addEventListener("click", () => { scale *= 1.2; draw(); });
+zoomOutBtn.addEventListener("click", () => { scale /= 1.2; draw(); });
+zoomResetBtn.addEventListener("click", () => { scale = 80 * pixelDensity; draw(); });
 
-// Initial setup
+window.addEventListener("resize", draw);
+
+// Initial
 updateSliderRanges();
 </script>
 </body>
